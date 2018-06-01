@@ -1,0 +1,281 @@
+---
+title: "Soil Characteristics and Burn"
+author: "Hans-Peter Bakker (BKKHAN001)"
+date: "6/1/2018"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = FALSE)
+```
+
+```{r}
+# libraries:
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+library(rpart)
+library(rpart.plot)
+library(caret)
+# library(logistf)
+library(brglm)
+library(corrplot)
+library(mice)
+```
+
+```{r}
+# read .csv file:
+geo_data <- read.table("trial.csv",
+                       header = TRUE, sep = ";")
+```
+##Data Cleaning and Initial Exploration
+
+After first abbreviating or shortening some of variable names and some of the category labels, the provided Excel spreadsheet was read in as a .csv file.
+
+The variables *site*, *type* and *burn* were converted to factor variables and the outcome variable "burn" was labelled "Burn" and "No Burn" after first changing the initial, numbered codes.
+
+A summary of the variables is shown below and reflects missing values for *hsv* and for *hp*
+
+```{r}
+#change site, type, burn to factor variables
+geo_data$site <- factor(geo_data$site)
+geo_data$type <- factor(geo_data$type)
+geo_data$burn <- ifelse(geo_data$burn == 1, 0, 1) # 0 = burn, 1 = no burn, swapped around
+geo_data$burn <- factor(geo_data$burn, labels = c("No Burn", "Burn"))
+
+summary(geo_data)
+```
+
+```{r}
+# numeric dataset
+geo_data_nums <- data.frame(scale(geo_data[,c('elevation',
+                                              'slope',
+                                              'hsv', # 3 NA's
+                                              'moisture',
+                                              'ph',
+                                              'ig_loss',
+                                              'sand',
+                                              # 'silt', # due to singularity
+                                              'clay')]))
+
+```
+
+The missing values were replaced by imputed values that were based on the medians of the respective variables. (GET BACK TO THIS!!)
+
+```{r}
+# impute missing values: multivariate imputations by chained equations (mice)
+# which rows (hp row 35; hsv rows 35,64 & 79 )
+imputed <- mice(geo_data, print = FALSE)
+# imputed$imp$hsv
+# imputed$imp$hp
+#pool(imputed)
+```
+
+### Correlation Matrix
+
+A plot indicating the correlations between the numeric variables is shown below (and a .jpeg file for publication was generated).
+
+```{r}
+# consider correlations
+cor_mat <- cor(geo_data_nums, use = 'pairwise.complete.obs')
+corrplot(cor_mat, method = 'pie', tl.col = "black")
+jpeg("corrplot1_geo.jpeg")
+corrplot(cor_mat, method = 'pie', tl.col = "black")
+dev.off()
+```
+
+The strong correlation between *moisture* and *ig_loss* would suggest that only one of these is required. The relatively strong negative correlation between *sand* and *clay* can also be expected due to the fact that a high percentage of the one automatically implies a low percentage of the other.
+
+### Principal Components Analysis
+
+To examine the latent dimensionality of the numerical data, principal components analysis was done on the standardised numeric variables. The scree plot below suggests an *elbow* at four components; and the summary output shows that a cumulative 86% of the variance would be captured by the first four components. (a .jpeg file of the screeplot is also generated)
+
+```{r}
+# to explore dimensionality of numerical variables for now only complete cases
+pca_geo <- princomp(geo_data_nums[complete.cases(geo_data_nums),])
+screeplot(pca_geo, type = "lines", main = "Scree Plot of Principal Components", npcs = 8)
+abline(v = 4, lty = 2)
+# for printing:
+jpeg("pca_screeplot.jpeg")
+screeplot(pca_geo, type = "lines", main = "Scree Plot of Principal Components", npcs = 8)
+abline(v = 4, lty = 2)
+dev.off()
+
+summary(pca_geo)
+```
+
+The vector plots below (which are also reproduced in .jpeg files) give some idea of the contributions of variables on the four dimensions. These could be used to interpret the meaning of the components/factors.
+
+Although this approach may be interesting as a point of discussion on how the variables relate to each other, taking this approach further would more likely lead to greater difficulties in the interpretation of outcomes and effects, but if required, this approach of working with latent constructs can be pursued.
+
+```{r}
+# using factomineR
+pca_geo_factoMineR <- PCA(geo_data_nums[complete.cases(geo_data_nums),], ncp = 4, graph = FALSE)
+
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(1,2),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 1 & 2",
+             repel = TRUE # Avoid text overlapping
+)
+
+jpeg("contributions_pca_1n2.jpeg")
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(1,2),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 1 & 2",
+             repel = TRUE # Avoid text overlapping
+)
+dev.off()
+
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(3,4),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 3 & 4",
+             repel = TRUE # Avoid text overlapping
+)
+
+jpeg("contributions_pca_3n4.jpeg")
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(3,4),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 3 & 4",
+             repel = TRUE # Avoid text overlapping
+)
+dev.off()
+
+```
+
+# Partition Tree
+
+To offer some initial exploration of the link between the variables and the outcome (*Burn* or *No Burn*), a simple partition exercise (or *tree*) was considered with all the variables - numeric and categorical - as response variables. A tree plot showing the first four levels is shown below. (and also added as a further .jpeg file for use in publication)
+
+```{r}
+# consider classification tree explantory:
+tree_geo <- rpart(burn ~ 
+                          area +
+                          geology +
+                          aspect +
+                          elevation +
+                          slope +
+                          hsv +
+                          hp +
+                          moisture +
+                          ph +
+                          ig_loss +
+                          colour +
+                          sand +
+                          silt +
+                          clay
+                          ,
+                  data = geo_data)
+```
+
+```{r}
+# par(xpd = NA)
+# plot(tree_geo)
+# text(tree_geo, pos = 2, cex = 0.8)
+rpart.plot(tree_geo, type = 4, extra = 1, cex = 0.8, main = "Burn Partition Tree")
+jpeg("partition_tree.jpeg")
+rpart.plot(tree_geo, type = 4, extra = 1, cex = 0.8, main = "Burn Partition Tree")
+dev.off()
+
+```
+
+The predictive power of this parititioning model using the existing data suggests relatively high levels of accuracy, as can be seen in the confusion matrix and relevant statistics shown below. If the purpose of this project was prediction, this line of investigation could be pursued into considering random forests and other methods.
+
+```{r}
+# consider prediction power of single tree:
+pred_class <- predict(tree_geo, type = "class")
+confusionMatrix(data = pred_class, reference = geo_data$burn)
+```
+
+## Logistic Regression 
+
+Given the binomial nature of the outcome variable, logistic regression was applied in an effort to quantify the relative importance of predictor variables on the class of outcome.
+
+Initial attempts were thwarted due to the fact that the data appeared to be perfectly separable. This meant that the standard estimating methods (Fisher's Scoring) could not be applied. An alternative, *bias reduction*, method proposed by Firth (1993) was adopted. Although this method may not offer entirely unbiased results, the estimates are at least finite and compare well with more established estimating procedures.
+ 
+After considering various alternative models (more details here if you like), the summary output below reflects the final, suggested model for these data. 
+
+
+```{r}
+# Logistic regression (first round shows up perfect separation...)
+lr_geo <- glm(burn ~ area +
+                      geology +
+                      aspect +
+                      elevation +
+                      slope +
+                      hsv +
+                      hp +
+                      moisture +
+                      ph +
+                      ig_loss +
+                      colour +
+                      sand +
+                      silt,
+              data = geo_data,
+              family = "binomial")
+```
+
+```{r}
+alt_mod <- brglm(burn ~ 
+                         # area +
+                         #  geology +
+                         # aspect +
+                         # elevation +
+                         # slope +
+                         hsv +
+                         hp +
+                         # moisture +
+                         ph +
+                         ig_loss +
+                         # colour +
+                         sand,#´+
+                 # silt,
+                 data = geo_data,
+                 family = "binomial")
+
+summary(alt_mod)
+```
+
+#### Please note:
+*The interpretation of the estimated coefficients needs to consider the logistic nature of these estimating procedures. Please don't hesitate to ask for help*
+
+```{r eval = FALSE}
+#consider stepwise approaches to consider "best" models: 
+library(glmnet)
+
+# getting model.matrix
+mat_mod <- model.matrix(burn ~ area +
+                                geology +
+                                aspect +
+                                elevation +
+                                slope +
+                                hsv +
+                                hp +
+                                moisture +
+                                ph +
+                                ig_loss +
+                                colour +
+                                sand +
+                                silt,
+                        data = geo_data)
+
+# find out NA rows
+which(is.na(rowSums(geo_data_nums)))
+net_mod <- glmnet(x = mat_mod[,-1], y = geo_data$burn[-c(35,64,79)],
+                   family = "binomial")
+
+plot(net_mod, label = TRUE)
+summary(net_mod)
+# 
+```
+
