@@ -1,29 +1,22 @@
 ---
 title: "Soil Characteristics and Burn"
-author: "Hans-Peter Bakker (BKKHAN001)"
+author: "Hans-Peter Bakker for Natasha Moore"
 date: "6/1/2018"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
   word_document: default
 bibliography: natasha.bib
 ---
 ---
 nocite: |
-        @rpart, @rpart.plot, @dplyr, @FactoMineR, @factoextra, @caret, @brglm, @corrplot, @mice, @glmnet, @RStudio
+        @rpart, @rpart.plot, @dplyr, @FactoMineR, @factoextra, @caret, @brglm, @corrplot, @mice, @glmnet, @RStudio, bestglm
 ...
 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = FALSE)
 ```
-
-# ```{r}
-# ## extract the bibtex entry from the return value
-# x <- citation("caret")
-# toBibtex(x)
-# ```
-
 
 ```{r}
 # libraries:
@@ -37,6 +30,7 @@ library(caret)
 library(brglm)
 library(corrplot)
 library(mice)
+library(bestglm)
 ```
 
 ```{r}
@@ -246,88 +240,95 @@ confusionMatrix(data = pred_class, reference = geo_data$burn)
 
 Given the binomial nature of the outcome variable, logistic regression was considered to quantify the relative importance of predictor variables on the class of outcome.
 
-Initial attempts were thwarted due to the fact that the data appeared to be perfectly separable. This meant that the standard estimating methods (Fisher's Scoring) could not be applied. An alternative, *bias reduction*, method proposed by Firth (1993) was adopted. Although this method may not offer entirely unbiased results, the estimates are finite and compare well with more established estimating procedures.
- 
-After considering various alternative models (more details here if you like), the summary output below reflects the final, suggested model for these data. 
+Initial attempts were thwarted due to the fact that the data appeared to be perfectly separable. This meant that the standard estimating methods (Fisher's Scoring) could not be applied. An examination of the data indicated that various combinations of the variables were responsible for the separation and as a result it was not possible to reconstitute or reconsider one or two of the variables only. An alternative, *bias reduction*, method proposed by Firth (1993) and cited in @brglm was adopted. Although this method may offer only second-order unbiased results, the estimates are finite and compare well with more established estimating procedures.
 
-The use of Akaike’s information criterion (AIC) for model selection when method = "brglm.fit" is controversial. AIC was developed under the assumptions that (i) estimation is by maximum likelihood and (ii) that estimation is carried out in a parametric family of distributions that contains the “true” model. At least the first assumption is not valid when using method = "brglm.fit". However, since the MLE is asymptotically unbiased, asymptotically the modified-scores approach is equivalent to maximum likelihood. A more appropriate information criterion seems to be Konishi’s generalized information criterion (see Konishi & Kitagawa, 1996, Sections 3.2 and 3.3), which will be implemented in a future version.
+Given the number of variables it was possible to run iterations of all the combinations of explanatory variables to identify the top five subset selections.
 
-
-
-```{r eval = FALSE}
-# Logistic regression (first round shows up perfect separation...)
-lr_geo <- glm(burn ~ area2 +
-                      geology2 +
-                      aspect2 +
-                      veg +
-                      elevation +
-                      slope +
-                      hsv +
-                      hp +
-                      moisture +
-                      ph +
-                      loss_ig +
-                      colour +
-                      sand +
-                      clay,
-              data = geo_data,
-              family = "binomial")
-
+```{r cache = TRUE}
+xy_frame <- geo_data %>%
+        select( area2,
+                geology2,
+                aspect2,
+                veg,
+                elevation,
+                slope,
+                hsv ,
+                hp,
+                moisture,
+                ph,
+                loss_ig,
+                colour,
+                sand,
+                clay,
+                y = burn)
+best_set_bic <- bestglm(xy_frame, family = binomial, IC = "BIC", method = "exhaustive")
+# best_set_bicq <- bestglm(xy_frame, family = binomial, IC = "BICq", q = 0.25, method = "exhaustive")
 ```
 
+The five "best" models based on the lowest Bayesian Information Criterion (BIC) are reflected below.
+
 ```{r}
-alt_mod <- brglm(burn ~
-                         area2 +
-                         geology2 +
+best_set_bic$BestModels
+#summary(best_set_bic$BestModel) #can use this to build model using brglm()
+```
+
+The following variables appear consistently in the top three and would therefore be included in any model: *elevation*, *hsv*, *hp*, *ph* and *sand*.
+
+The third model, which includes both *aspect* and *veg*, but not *colour* will be used in the estimation based on advice from the researcher.
+
+The list of variables that were included in the estimation of the final model will therefore be:
+
+* *aspect*
+* *veg*
+* *elevation*
+* *hsv*
+* *hp*
+* *ph*
+* *loss_ig*
+* *sand*
+
+```{r}
+model_geo <- brglm(burn ~
                          aspect2 +
                          veg +
                          elevation +
-                         slope +
                          hsv +
                          hp +
-                         moisture +
                          ph +
                          loss_ig +
-                         colour +
-                         sand +
-                         clay,
+                         sand,
                  data = geo_data,
                  family = "binomial")
 
-summary(alt_mod)
+```
+
+To consider the model fit its *deviance*, which in logistic regression can be considered to exhibit a Chi-Squared ($\chi^2$) distribution, and the model's degrees of freedom were used to test for significance. A p-value of close one and therefore considerably larger than an 0.05 cut-off level indicated an acceptable fit (@farawayExt).
+
+Additionally, the squared correlation between model predicted and observed outcomes was considered and, given a value of `r round(cor(ifelse(predict(model_geo, type = "response") > 0.5, 1, 0), ifelse(geo_data$burn[-c(35,64,79)] == "Burn", 1, 0))^2, 4) `, further suggests a reasonable result.
+
+Finally, as with the partition tree above, a confusion matrix, shown below, was drawn from the observed and predicted values, also indicating a model with strong predictive power.
+
+```{r}
+#  `r round(pchisq(deviance(model_geo), df.residual(model_geo), lower = FALSE))`
+# # consider observed vs fitted values: and compute the pearson correlation 'r' . Squaring it gives good idea..
+preds <- predict(model_geo, type = "response")
+# preds_num <- ifelse(predict(model_geo, type = "response") > 0.5, 1, 0)
+# obs_num <- ifelse(geo_data$burn[-c(35,64,79)] == "Burn", 1, 0)
+# round(cor(ifelse(predict(model_geo, type = "response") > 0.5, 1, 0), ifelse(geo_data$burn[-c(35,64,79)] == "Burn", 1, 0))^2, 4)
+
+# confusion matrix
+preds_cat <- ifelse(preds > 0.5, "Burn", "No Burn")
+confusionMatrix(preds_cat, geo_data$burn[-c(35,64,79)])
+
+```
+
+The summary output below reflects the final, suggested model for these data. 
+
+```{r}
+summary(model_geo)
 ```
 
 #### Please note:
 *The interpretation of the estimated coefficients needs to consider the logistic nature of these estimating procedures. Please don't hesitate to ask for help*
-
-```{r eval = FALSE}
-#consider stepwise approaches to consider "best" models: 
-library(glmnet)
-
-# getting model.matrix
-mat_mod <- model.matrix(burn ~ area2 +
-                                geology2 +
-                                aspect2 +
-                                elevation +
-                                slope +
-                                hsv +
-                                hp +
-                                moisture +
-                                ph +
-                                loss_ig +
-                                colour +
-                                sand +
-                                silt,
-                        data = geo_data)
-
-# find out NA rows
-which(is.na(rowSums(geo_data_nums)))
-net_mod <- glmnet(x = mat_mod[,-1], y = geo_data$burn[-c(35,64,79)],
-                   family = "binomial")
-
-plot(net_mod, label = TRUE)
-summary(net_mod)
-# 
-```
 
 # References
