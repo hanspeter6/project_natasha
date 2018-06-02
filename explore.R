@@ -11,14 +11,13 @@ library(corrplot)
 library(mice)
 
 # read .csv file:
-geo_data <- read.table("trial.csv",
+geo_data <- read.table("trial2.csv",
                        header = TRUE, sep = ";")
 
 #change site, type, burn to factor variables
 geo_data$site <- factor(geo_data$site)
 geo_data$type <- factor(geo_data$type)
-geo_data$burn <- ifelse(geo_data$burn == 1, 0, 1) # 0 = burn, 1 = no burn, swapped around
-geo_data$burn <- factor(geo_data$burn, labels = c("NoBurn", "Burn"))
+geo_data$burn <- factor(geo_data$burn, labels = c("No Burn", "Burn"))
 
 summary(geo_data)
 
@@ -26,9 +25,10 @@ summary(geo_data)
 geo_data_nums <- data.frame(scale(geo_data[,c('elevation',
                                               'slope',
                                               'hsv', # 3 NA's
+                                              'hp',
                                               'moisture',
                                               'ph',
-                                              'ig_loss',
+                                              'loss_ig',
                                               'sand',
                                               # 'silt', # due to singularity
                                               'clay')]))
@@ -112,16 +112,17 @@ pred_class <- predict(tree_geo, type = "class")
 confusionMatrix(data = pred_class, reference = geo_data$burn)
 
 # Logistic regression (first round shows up perfect separation...)
-lr_geo <- glm(burn ~ area +
-                      geology +
-                      aspect +
+lr_geo <- glm(burn ~ area2 +
+                      geology2 +
+                      aspect2 +
+                      veg +
                       elevation +
                       slope +
                       hsv +
                       hp +
                       moisture +
                       ph +
-                      ig_loss +
+                      loss_ig +
                       colour +
                       sand +
                       silt,
@@ -134,53 +135,124 @@ lr_geo <- glm(burn ~ area +
 # His method effectively removes a term in the estimation of coefficients.
 # still want to reconsider stuff...with adjusted data.
 
-alt_mod <- brglm(burn ~ 
-                         # area +
-                         #  geology +
-                         # aspect +
-                         # elevation +
-                         # slope +
+# focus on subset selection:
+
+alt_mod_full <- brglm(burn ~
+                         area2 +
+                         geology2 +
+                         aspect2 +
+                         veg +
+                         elevation +
+                         slope +
                          hsv +
                          hp +
-                         # moisture +
+                         moisture +
                          ph +
-                         ig_loss +
-                         # colour +
-                         sand,#´+
-                 # silt,
+                         loss_ig +
+                         colour +
+                         sand +
+                         clay,
                  data = geo_data,
                  family = "binomial")
 
-summary(alt_mod)
+summary(alt_mod_full)
 
+library(bestglm)
+inp <- geo_data %>%
+        select( area2,
+                geology2,
+                aspect2,
+                veg,
+                elevation,
+                slope,
+                hsv ,
+                hp,
+                moisture,
+                ph,
+                loss_ig,
+                colour,
+                sand,
+                clay,
+                y = burn)
+tester <- bestglm(inp, family = binomial, IC = "BIC", method = "exhaustive")
+
+tester$BestModels
+summary(tester$BestModel) #can use this to build model using brglm()
+
+# try lassoo:
+glmnet()
+
+
+
+# example with only ph as predictor:
+# intercept = 8.283 : the log odds for burn with ph = 0.
+# coefficient = -2.09 : the expected change in log odds for a one-unit increase in ph.
+# the odds ratio can be calculated as exp(-2.09) = 0.1236871 :
+#        so we would expect about an 82% decrease in the odds of being classified as burn for a one unit increase in ph
+
+# want to confirm this:
+# add column with predicted values:
+
+geo_data$predicted <- predict(alt_mod) # log(odds) . Can use type = "response" for the predicted probabilities
+
+#Examine the effect of a one-unit increase in ph by subtracting the corresponding log odds.
+# For example, we will look at ph of 4.18 and 3.18 and calculate the difference in the estimated log odds.
+#  Then exponentiate it to get the odds ratio.
+s1<-geo_data$predicted[geo_data$ph==3.18][1]
+s2<-geo_data$predicted[geo_data$ph==4.18][1]
+
+logodd_diff<- s2 - s1
+odd_ratio <- exp(logodd_diff)
+
+xtabs(~ geology + area, data = geo_data)
+# consider this with 
+
+exp(confint(alt_mod))
+exp(-3.99)
+exp(0.3576)
+predict(alt_mod, type = "response")
+
+?predict
 #consider stepwise approaches to consider "best" models: 
 library(glmnet)
 
 # getting model.matrix
-mat_mod <- model.matrix(burn ~ area +
-                                geology +
-                                aspect +
+mat_mod <- model.matrix(burn ~ area2 +
+                                geology2 +
+                                aspect2 +
+                                veg +
                                 elevation +
                                 slope +
                                 hsv +
                                 hp +
                                 moisture +
                                 ph +
-                                ig_loss +
+                                loss_ig +
                                 colour +
                                 sand +
-                                silt,
+                                clay,
                         data = geo_data)
 
 # find out NA rows
 which(is.na(rowSums(geo_data_nums)))
+# Note alpha=1 for lasso only and can blend with ridge penalty down to
+# alpha=0 ridge only.
 net_mod <- glmnet(x = mat_mod[,-1], y = geo_data$burn[-c(35,64,79)],
-                   family = "binomial")
+                   family = "binomial", alpha = 1)
+
+# Plot variable coefficients vs. shrinkage parameter lambda.
+plot(net_mod, xvar="lambda", label = TRUE)
 
 plot(net_mod, label = TRUE)
 summary(net_mod)
-# 
+net_mod 
 
+coef(net_mod)[,8]
+
+cv.glmmod <- cv.glmnet(x = mat_mod[,-1], y = geo_data$burn[-c(35,64,79)],
+                       family = "binomial", alpha = 1)
+plot(cv.glmmod)
+(best.lambda <- cv.glmmod$lambda.min)
 
 # # consider causes of perfect separation:
 # library(safeBinaryRegression)
