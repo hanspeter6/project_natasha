@@ -1,16 +1,16 @@
 ---
 title: "Soil Characteristics and Burn"
-author: "Hans-Peter Bakker for Natasha Moore"
+author: "Hans-Peter Bakker  for Natasha Moore"
 date: "6/1/2018"
 output:
-  pdf_document: default
-  html_document: default
   word_document: default
+  html_document: default
+  pdf_document: default
 bibliography: natasha.bib
 ---
 ---
 nocite: |
-        @rpart, @rpart.plot, @dplyr, @FactoMineR, @factoextra, @caret, @brglm, @corrplot, @mice, @glmnet, @RStudio, bestglm
+        @rpart, @rpart.plot, @dplyr, @FactoMineR, @factoextra, @caret, @brglm, @corrplot, @mice, @glmnet, @RStudio, @bestglm, @VIM
 ...
 
 
@@ -31,6 +31,8 @@ library(brglm)
 library(corrplot)
 library(mice)
 library(bestglm)
+library(mice)
+library(VIM)
 ```
 
 ```{r}
@@ -44,7 +46,7 @@ After first abbreviating or shortening some of variable names and some of the ca
 
 The variables *site*, *type* and *burn* were converted to factor variables.
 
-A summary of the variables is shown below and reflects missing values for *hsv* and for *hp*.
+A summary of the variables is shown below and reflects a few missing values for *hsv* and for *hp*. The analysis will first proceed with only the complete samples. The missing data was considered later.
 
 ```{r}
 #change site, type, burn to factor variables
@@ -70,18 +72,7 @@ geo_data_nums <- data.frame(scale(geo_data[,c('elevation',
 
 ```
 
-The missing values were replaced by imputed values that were based on the medians of the respective variables. (GET BACK TO THIS!!)
-
-```{r}
-# impute missing values: multivariate imputations by chained equations (mice)
-# which rows (hp row 35; hsv rows 35,64 & 79 )
-imputed <- mice(geo_data, print = FALSE)
-# imputed$imp$hsv
-# imputed$imp$hp
-#pool(imputed)
-```
-
-Finally, given the linear dependence between between *silt*, *clay* and *sand* (they add up to 100%), *silt* was dropped from the dataset.
+Given the linear dependence between between *silt*, *clay* and *sand* (they add up to 100%), *silt* was dropped from the dataset.
 
 ### Correlation Matrix
 
@@ -102,7 +93,7 @@ The generally high levels of correlation would suggest that dimension reduction 
 
 ### Principal Components Analysis
 
-To examine the latent dimensionality of the numerical data, principal components analysis was done on the standardised numeric variables. The scree plot below suggests an *elbow* at four components. The summary output shows that a cumulative 86% of the variance would be captured by the first four components. (a .jpeg file of the screeplot is also generated)
+To examine the latent dimensionality of the numerical data, principal components analysis was done on the standardised numeric variables. The scree plot below suggests an *elbow* at four components. The summary output shows that a cumulative ~83% of the variance would be captured by the first four components. (a .jpeg file of the screeplot is also generated)
 
 ```{r}
 # to explore dimensionality of numerical variables for now only complete cases
@@ -118,13 +109,15 @@ dev.off()
 summary(pca_geo)
 ```
 
-The vector plots below (which are also reproduced in .jpeg files) give some idea of the contributions of variables on the four dimensions. These could be used to interpret the meaning of the components/factors.
+The vector plots and the loadings below give some idea of the contributions of variables on the four dimensions. These could be used to interpret the meaning of the components/factors.
 
 Although this approach may be interesting as a point of discussion on how the variables relate to each other, taking this approach further would more likely lead to greater difficulties in the interpretation of outcomes and effects, but if required, this approach of working with latent constructs can be pursued.
 
 ```{r}
 # using factomineR
 pca_geo_factoMineR <- PCA(geo_data_nums[complete.cases(geo_data_nums),], ncp = 4, graph = FALSE)
+
+sweep(pca_geo_factoMineR$var$coord,2,sqrt(pca_geo_factoMineR$eig[1:ncol(pca_geo_factoMineR$var$coord),1]),FUN="/")
 
 fviz_pca_var(pca_geo_factoMineR,
              axes = c(1,2),
@@ -233,7 +226,7 @@ The predictive power of the second partitioning model (without *colour*), which 
 ```{r}
 # consider prediction power of single tree:
 pred_class <- predict(tree_geo2, type = "class")
-confusionMatrix(data = pred_class, reference = geo_data$burn)
+confusionMatrix(data = pred_class, reference = geo_data$burn, positive = "Burn")
 ```
 
 ## Logistic Regression 
@@ -276,7 +269,7 @@ The following variables appear consistently in the top three and would therefore
 
 The third model, which includes both *aspect* and *veg*, but not *colour* will be used in the estimation based on advice from the researcher.
 
-The list of variables that were included in the estimation of the final model will therefore be:
+The list of variables that were included in the estimation of the first model will therefore be:
 
 * *aspect*
 * *veg*
@@ -317,18 +310,60 @@ preds <- predict(model_geo, type = "response")
 # round(cor(ifelse(predict(model_geo, type = "response") > 0.5, 1, 0), ifelse(geo_data$burn[-c(35,64,79)] == "Burn", 1, 0))^2, 4)
 
 # confusion matrix
-preds_cat <- ifelse(preds > 0.5, "Burn", "No Burn")
-confusionMatrix(preds_cat, geo_data$burn[-c(35,64,79)])
+preds_cat <- ifelse(preds > 0.5, "No Burn", "Burn")
+confusionMatrix(preds_cat, geo_data$burn[-c(35,64,79)], positive = "Burn")
 
 ```
 
-The summary output below reflects the final, suggested model for these data. 
+The summary output for this model: 
 
 ```{r}
 summary(model_geo)
 ```
 
+## Treatment of Missing Data
+
+Using Predictive Mean Matching, multiple (50) imputed datasets were pooled and the same model was fitted on the pooled data. See @pmm
+
+```{r cache = TRUE}
+# generating imputed values
+imputed <- mice(geo_data, print = FALSE, m = 50)
+
+# method = Predictive Mean Matching : check out: #https://statisticalhorizons.com/predictive-mean-matching
+
+# marginplot(geo_data[,c('hsv', 'hp')], col = mdc(1:2))
+```
+
+Plots indicating distributions of imputed values are shown below. The idea is to ensure that the imputed values (in red) are distributed similarly to the observed values (in blue) for the two variables.
+
+```{r}
+stripplot(imputed, hsv + hp ~ .imp, pch = 20, cex = 1.3)
+```
+
+The same model as was developed above was fitted using the pooled datasets. The summary output is shown below. The coefficient estimates are not substantively different from the model in which the sample with missing values were excluded. *fmi* indicates the fraction of missing data and *lambda* is a measure of the proportion of total variance attributed to the missing data.
+
+Given the marginal difference of using the pooled imputed model and the model that discounts the missing values, it is suggested that the samples with missing values are simply excluded and that the research proceeds with the logistic model described above.
+
+```{r}
+fit <- with(imputed, brglm(burn ~
+                                         aspect2 +
+                                         veg +
+                                         elevation +
+                                         hsv +
+                                         hp +
+                                         ph +
+                                         loss_ig +
+                                         sand))
+pooled <- pool(fit)
+round(summary(pooled),4)
+```
+
 #### Please note:
 *The interpretation of the estimated coefficients needs to consider the logistic nature of these estimating procedures. Please don't hesitate to ask for help*
 
+Below are some guidelines to help with the interpretation. The first formula links the 12 coefficient estimates with observed variable values.
+$$log(odds) = \beta_0 + \beta_1aspect2North + \beta_2aspect2South + ... + \beta_9ph + \beta_{10}loss_ig + \beta_{11}sand$$
+and, $$odds = \frac{(Probability(No Burn)}{Probability(Burn)}$$
+which, when transformed can give you:
+$$P(No Burn) = \frac{odds}{(1 + odds)}$$
 # References

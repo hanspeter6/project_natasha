@@ -137,23 +137,30 @@ lr_geo <- glm(burn ~ area2 +
 
 # focus on subset selection:
 
-alt_mod_full <- brglm(burn ~
-                         area2 +
-                         geology2 +
-                         aspect2 +
-                         veg +
-                         elevation +
-                         slope +
-                         hsv +
-                         hp +
-                         moisture +
-                         ph +
-                         loss_ig +
-                         colour +
-                         sand +
-                         clay,
-                 data = geo_data,
-                 family = "binomial")
+model_geo <- brglm(burn ~
+                           aspect2 +
+                           veg +
+                           elevation +
+                           hsv +
+                           hp +
+                           ph +
+                           loss_ig +
+                           sand,
+                   data = geo_data,
+                   family = "binomial")
+
+summary(model_geo)
+
+preds <- predict(model_geo, type = "response")
+preds_num <- ifelse(preds > 0.5, 1, 0)
+obs_num <- ifelse(geo_data$burn[-c(35,64,79)] == "Burn", 1, 0)
+cor(preds_num, obs_num)^2
+
+35,64 & 79
+
+geo_data$burn
+pchisq(deviance(model_geo), df.residual(model_geo), lower = FALSE)
+
 
 summary(alt_mod_full)
 
@@ -181,6 +188,16 @@ summary(tester$BestModel) #can use this to build model using brglm()
 
 # try lassoo:
 glmnet()
+
+
+#Example 8. Logistic regression
+data(SAheart)
+bestglm(SAheart, IC="BIC", family=binomial)
+#BIC agrees with backward stepwise approach
+out<-glm(chd~., data=SAheart, family=binomial)
+step(out, k=log(nrow(SAheart)))
+#but BICq with q=0.25
+bestglm(SAheart, IC="BICq", t=0.25, family=binomial)
 
 
 
@@ -292,3 +309,47 @@ plot(cv.glmmod)
 # # plot(x,y)
 # 
 # detach("package:safeBinaryRegression", unload = TRUE)
+
+
+# workin on interpretations:
+
+sample1 <- (46.9169601) + (-5.6199219)*(1) + (7.4460668)*(1) + (-0.0189997)*(1778.122) + (0.0478927)*(140) + (0.0010664)*(4200)+ (-7.5798635)*(3.88) + (0.2390717)*(9.759161) + ( 0.3659224)*(30.33467)
+
+sample2 <- (46.9169601) + (-5.6199219)*(1) + (7.4460668)*(1) + (-0.0189997)*(1777.968) + (0.0478927)*(38) + (0.0010664)*(900) + (-7.5798635)*(3.89) + (0.2390717)*(23.636391) + ( 0.3659224)*(14.96546)
+
+exp(sample1)
+exp(sample2)
+
+exp(sample1)/(1+exp(sample1))
+exp(sample2)/(1+exp(sample2))
+
+###MISSS
+###
+###
+###
+###
+# explore imputed:
+library(mice)
+library(VIM)
+imputed <- mice(geo_data, print = FALSE, m = 50)
+
+# method = Predictive Mean Matching : check out: https://statisticalhorizons.com/predictive-mean-matching
+
+imputed$imp$hsv
+marginplot(geo_data[,c('hsv', 'hp')], col = mdc(1:2))
+
+stripplot(imputed, hsv + hp ~ .imp, cex = 1.2, pch = 20)
+fit <- with(imputed, brglm(burn ~
+                                         aspect2 +
+                                         veg +
+                                         elevation +
+                                         hsv +
+                                         hp +
+                                         ph +
+                                         loss_ig +
+                                         sand))
+pooled <- pool(fit)
+round(summary(pooled),4)
+imputed$predictorMatrix
+
+fitted(fit)
