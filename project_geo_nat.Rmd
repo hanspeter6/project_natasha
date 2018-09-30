@@ -4,13 +4,13 @@ author: "Hans-Peter Bakker  for Natasha Moore"
 date: "6/1/2018"
 output:
   word_document: default
-  html_document: default
   pdf_document: default
+  html_document: default
 bibliography: natasha.bib
 ---
 ---
 nocite: |
-        @rpart, @rpart.plot, @dplyr, @FactoMineR, @factoextra, @caret, @brglm, @corrplot, @mice, @glmnet, @RStudio, @bestglm, @VIM
+        @rpart, @rpart.plot, @dplyr, @FactoMineR, @factoextra, @caret, @brglm, @corrplot, @mice, @glmnet, @RStudio, @bestglm, @VIM, @faraway
 ...
 
 
@@ -33,6 +33,7 @@ library(mice)
 library(bestglm)
 library(mice)
 library(VIM)
+library(faraway)
 ```
 
 ```{r}
@@ -46,7 +47,7 @@ After first abbreviating or shortening some of variable names and some of the ca
 
 The variables *site*, *type* and *burn* were converted to factor variables.
 
-A summary of the variables is shown below and reflects a few missing values for *hsv* and for *hp*. The analysis will first proceed with only the complete samples. The missing data was considered later.
+Summaries of the variables are shown below and reflect a few missing values for *hsv* and for *hp*. The analysis will first proceed with only the complete cases. The impact of the missing data was considered later.
 
 ```{r}
 #change site, type, burn to factor variables
@@ -89,11 +90,11 @@ dev.off()
 
 The strong correlation between *moisture* and *loss_ig* would suggest that only one of these is required. The relatively strong negative correlation between *sand* and *clay* can also be expected due to the fact that a high percentage of the one automatically implies a low percentage of the other.
 
-The generally high levels of correlation would suggest that dimension reduction may be worth considering, although it may  be accompanied by more difficult interpretations.
+The generally high levels of correlation would suggest that dimension reduction may be worth considering, although it would  be accompanied by more difficult interpretations.
 
 ### Principal Components Analysis
 
-To examine the latent dimensionality of the numerical data, principal components analysis was done on the standardised numeric variables. The scree plot below suggests an *elbow* at four components. The summary output shows that a cumulative ~83% of the variance would be captured by the first four components. (a .jpeg file of the screeplot is also generated)
+To examine the latent dimensionality of the numerical data, principal components analysis was done on the standardised numeric variables. The scree plot (with *elbows* at 3 and 6) in conjunction with the summary output below suggests the selection of four components, reflecting a cumulative ~83% of the variance. (a .jpeg file of the screeplot is also generated)
 
 ```{r}
 # to explore dimensionality of numerical variables for now only complete cases
@@ -109,9 +110,9 @@ dev.off()
 summary(pca_geo)
 ```
 
-The vector plots and the loadings below give some idea of the contributions of variables on the four dimensions. These could be used to interpret the meaning of the components/factors.
+The vector plots and the loadings below give some idea of the contributions of variables to the four dimensions. These could be used to interpret the meaning of the components/factors.
 
-Although this approach may be interesting as a point of discussion on how the variables relate to each other, taking this approach further would more likely lead to greater difficulties in the interpretation of outcomes and effects, but if required, this approach of working with latent constructs can be pursued.
+Although this approach may be interesting as a point of discussion on how the variables relate to each other, taking this approach further would more likely lead to greater difficulties in the interpretation of outcomes and effects. If required however, this approach of working with latent constructs can be pursued.
 
 ```{r}
 # using factomineR
@@ -158,9 +159,9 @@ dev.off()
 ```
 ## Partition Tree
 
-To offer some initial exploration of the link between the variables and the outcome (*Burn* or *No Burn*), a simple partition exercise (or *tree*) was considered with all the variables - numeric and categorical - as response variables. Only the adjusted (reduced levels) categorical variables were used. Two 
+To offer some initial exploration of the link between the variables and the outcome (*Burn* or *No Burn*), a simple partition exercise (or *tree*) was considered with all the variables - numeric and categorical - as response variables. Only the adjusted (reduced levels) categorical variables were used. 
 
-plots showing the first four levels are shown below. (and also added as a further .jpeg file for use in publication). In the second plot, the variable *colour* was removed.
+Two plots showing the first four levels are shown below. (and also added as a further .jpeg file for use in publication). In the second plot, the variable *colour* was removed.
 
 ```{r}
 # consider classification tree for explanatory reasons:
@@ -221,7 +222,7 @@ dev.off()
 
 ```
 
-The predictive power of the second partitioning model (without *colour*), which showed higher levels of accuracy than the full set, using the existing data as predictors suggests relatively high levels of accuracy - as can be seen in the confusion matrix and relevant statistics shown below. If the purpose of this project was prediction, this line of investigation could be pursued into considering random forests and other methods.
+The predictive power of the second partitioning model (without *colour*), which showed higher levels of accuracy than the full set, using the existing data as predictors, suggests relatively high levels of accuracy - as can be seen in the confusion matrix and relevant statistics shown below. If the purpose of this project was prediction, this line of investigation could be pursued into considering random forests and other methods.
 
 ```{r}
 # consider prediction power of single tree:
@@ -235,7 +236,7 @@ Given the binomial nature of the outcome variable, logistic regression was consi
 
 Initial attempts were thwarted due to the fact that the data appeared to be perfectly separable. This meant that the standard estimating methods (Fisher's Scoring) could not be applied. An examination of the data indicated that various combinations of the variables were responsible for the separation and as a result it was not possible to reconstitute or reconsider one or two of the variables only. An alternative, *bias reduction*, method proposed by Firth (1993) and cited in @brglm was adopted. Although this method may offer only second-order unbiased results, the estimates are finite and compare well with more established estimating procedures.
 
-Given the number of variables it was possible to run iterations of all the combinations of explanatory variables to identify the top five subset selections.
+Given the number of variables it was possible to run iterations of all possible combinations of explanatory variables to identify the top five subset selections by their Bayesian Information Criterion (BIC).
 
 ```{r cache = TRUE}
 xy_frame <- geo_data %>%
@@ -258,16 +259,13 @@ best_set_bic <- bestglm(xy_frame, family = binomial, IC = "BIC", method = "exhau
 # best_set_bicq <- bestglm(xy_frame, family = binomial, IC = "BICq", q = 0.25, method = "exhaustive")
 ```
 
-The five "best" models based on the lowest Bayesian Information Criterion (BIC) are reflected below.
 
 ```{r}
 best_set_bic$BestModels
 #summary(best_set_bic$BestModel) #can use this to build model using brglm()
 ```
 
-The following variables appear consistently in the top three and would therefore be included in any model: *elevation*, *hsv*, *hp*, *ph* and *sand*.
-
-The third model, which includes both *aspect* and *veg*, but not *colour* will be used in the estimation based on advice from the researcher.
+The first, "best" model, which includes both *aspect* and *veg*, but not *colour* was be used in the modelling below.
 
 The list of variables that were included in the estimation of the first model will therefore be:
 
@@ -295,11 +293,19 @@ model_geo <- brglm(burn ~
 
 ```
 
-To consider the model fit its *deviance*, which in logistic regression can be considered to exhibit a Chi-Squared ($\chi^2$) distribution, and the model's degrees of freedom were used to test for significance. A p-value of close one and therefore considerably larger than an 0.05 cut-off level indicated an acceptable fit (@farawayExt).
+To consider the model fit, its *deviance*, which in logistic regression can be considered to exhibit a Chi-Squared ($\chi^2$) distribution, and the model's degrees of freedom were used to test for significance. A p-value of close to one, and therefore considerably larger than an 0.05 cut-off level, indicated an acceptable fit (@farawayExt).
 
-Additionally, the squared correlation between model predicted and observed outcomes was considered and, given a value of `r round(cor(ifelse(predict(model_geo, type = "response") > 0.5, 1, 0), ifelse(geo_data$burn[-c(35,64,79)] == "Burn", 1, 0))^2, 4) `, further suggests a reasonable result.
+Additionally, the squared correlation between model predicted and observed outcomes was considered and, given a value of `r round(cor(ifelse(predict(model_geo, type = "response") > 0.5, 1, 0), ifelse(geo_data$burn[-c(35,64,79)] == "Burn", 1, 0))^2, 4) `, confirms a reasonable result.
 
-Finally, as with the partition tree above, a confusion matrix, shown below, was drawn from the observed and predicted values, also indicating a model with strong predictive power.
+A measure of fit which is analogous with $R^2$ - a popular measure of fit for normal linear models as a indication of the proportion of variance explained by the model - as described by Nagelkerke (1991) and cited in @farawayExt (p41) was used to calculate a proportion of variance explained by the model of `r round((1-exp((model_geo$deviance - model_geo$null.deviance)/82))/(1-exp(-model_geo$null.deviance/82)),3) `, which is good.
+
+Furthermore, a *halfnorm* plot of the residuals, shown below, provides further evidence of a fit without overdispersion of residuals @farawayExt.
+
+```{r}
+halfnorm(residuals(model_geo))
+```
+
+Finally, as with the partition tree above, a confusion matrix, shown below, was drawn from the observed and predicted values,indicating a model with strong predictive power.
 
 ```{r}
 #  `r round(pchisq(deviance(model_geo), df.residual(model_geo), lower = FALSE))`
@@ -315,7 +321,7 @@ confusionMatrix(preds_cat, geo_data$burn[-c(35,64,79)], positive = "Burn")
 
 ```
 
-The summary output for this model: 
+The summary output for this model to be used for interpreting coefficients of independent variables is printed below: 
 
 ```{r}
 summary(model_geo)
@@ -323,7 +329,7 @@ summary(model_geo)
 
 ## Treatment of Missing Data
 
-Using Predictive Mean Matching, multiple (50) imputed datasets were pooled and the same model was fitted on the pooled data. See @pmm
+Using Predictive Mean Matching multiple (50) imputed datasets were pooled and the same model was fitted on the pooled data. See @pmm.
 
 ```{r cache = TRUE}
 # generating imputed values
@@ -342,7 +348,7 @@ stripplot(imputed, hsv + hp ~ .imp, pch = 20, cex = 1.3)
 
 The same model as was developed above was fitted using the pooled datasets. The summary output is shown below. The coefficient estimates are not substantively different from the model in which the sample with missing values were excluded. *fmi* indicates the fraction of missing data and *lambda* is a measure of the proportion of total variance attributed to the missing data.
 
-Given the marginal difference of using the pooled imputed model and the model that discounts the missing values, it is suggested that the samples with missing values are simply excluded and that the research proceeds with the logistic model described above.
+Given the marginal difference of using the pooled imputed model and the model that discounts the missing values, it is suggested that the samples with missing values simply be excluded and that the research proceeds with the logistic model described above.
 
 ```{r}
 fit <- with(imputed, brglm(burn ~
@@ -363,7 +369,7 @@ round(summary(pooled),4)
 
 Below are some guidelines to help with the interpretation. The first formula links the 12 coefficient estimates with observed variable values.
 $$log(odds) = \beta_0 + \beta_1aspect2North + \beta_2aspect2South + ... + \beta_9ph + \beta_{10}loss_ig + \beta_{11}sand$$
-and, $$odds = \frac{(Probability(No Burn)}{Probability(Burn)}$$
+where, $$odds = \frac{(Probability(Burn)}{Probability(No Burn)}$$
 which, when transformed can give you:
-$$P(No Burn) = \frac{odds}{(1 + odds)}$$
+$$P(Burn) = \frac{odds}{(1 + odds)}$$
 # References
