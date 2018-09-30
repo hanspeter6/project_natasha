@@ -1,0 +1,481 @@
+---
+title: "Soil Characteristics and Burn"
+author: "Hans-Peter Bakker  for Natasha Moore"
+date: "6/1/2018"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+bibliography: natasha.bib
+---
+---
+nocite: |
+        @dplyr, @FactoMineR, @factoextra, @caret, @corrplot, @RStudio, @faraway
+...
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = FALSE)
+```
+
+```{r}
+# libraries:
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+# library(rpart)
+# library(rpart.plot)
+library(caret)
+# library(logistf)
+# library(brglm)
+library(corrplot)
+# library(mice)
+# library(bestglm)
+# library(mice)
+# library(VIM)
+library(faraway)
+library(MASS)
+library(relaimpo)
+library(bestglm)
+library(leaps)
+```
+
+```{r}
+# read .csv file:
+geo_data <- read.table("trial2.csv",
+                       header = TRUE, sep = ";")
+```
+
+## Introductory Note
+
+Initially the analysis was understood to be aimed at using soil properties to predict if a sample originated from a burn or no-burn site and to try and understand the degree of influence of different soil properties on such a prediction.
+
+It now appears that this was trying to answer the wrong question. This only became apparent to the researcher after attempting to interpret the results of applying logistic regression to the data with a binary outcome, *burn* or *no-burn*.
+
+The questions considered in this draft relate to the effect *burn* or *no-burn* have on five different numeric variables, namely: *hsv, hp, moisture, ph, loss_ig*, controlling for the effects of *area, type, geology, aspect, veg, slope, elevation, sand, silt, and clay*.
+
+For this draft, *colour* has not yet been included as one of the soil property outcomes since it is categorical. This could be reconsidered in a further draft. For this draft the combined levels (ie *area2 and aspect2*) are considered. This also can be reconsidered for a next draft and on advice from the researcher.
+
+## Data Cleaning and Initial Exploration
+
+After first abbreviating some of variable names and category labels, the provided Excel spreadsheet was read in as a .csv file.
+
+The variables *site*, *type* and *burn* were converted to factor variables.
+
+Summaries of the variables are shown below and reflect a few missing values for *hsv* and for *hp*. The analysis will first proceed with only the complete cases. The impact of the missing data can be considered if required.
+
+```{r}
+#change site, type, burn to factor variables
+geo_data$site <- factor(geo_data$site)
+geo_data$type <- factor(geo_data$type)
+geo_data$burn <- factor(geo_data$burn, labels = c("No Burn", "Burn"))
+
+summary(geo_data)
+```
+
+```{r}
+# numeric dataset
+geo_data_nums <- data.frame(scale(geo_data[,c('elevation',
+                                              'slope',
+                                              'hsv', # 3 NA's
+                                              'hp',
+                                              'moisture',
+                                              'ph',
+                                              'loss_ig',
+                                              'sand',
+                                              # 'silt', # due to singularity
+                                              'clay')]))
+
+```
+
+Given the linear dependence between between *silt*, *clay* and *sand* (they add up to 100%), *silt* was dropped from the dataset.
+
+### Correlation Matrix
+
+A plot indicating the correlations between the numeric variables is shown below.
+
+```{r}
+# consider correlations
+cor_mat <- cor(geo_data_nums, use = 'pairwise.complete.obs')
+corrplot(cor_mat, method = 'pie', tl.col = "black")
+jpeg("corrplot1_geo.jpeg")
+corrplot(cor_mat, method = 'pie', tl.col = "black")
+dev.off()
+```
+
+The strong correlation between *moisture* and *loss_ig* would suggest that only one of these is required. This draft will proceed without *moisture*. The relatively strong negative correlation between *sand* and *clay* can also be expected due to the fact that a high percentage of the one automatically implies a low percentage of the other.
+
+The generally high levels of correlation would suggest that dimension reduction may be worth considering, although it would  be accompanied by more difficult interpretations.
+
+### Principal Components Analysis
+
+To examine the latent dimensionality of the numerical data, principal components analysis was done on the standardised numeric variables. The scree plot (with *elbows* at 3 and 6) in conjunction with the summary output below suggests the selection of four components, reflecting a cumulative ~83% of the variance.
+
+```{r}
+# to explore dimensionality of numerical variables for now only complete cases
+pca_geo <- princomp(geo_data_nums[complete.cases(geo_data_nums),])
+screeplot(pca_geo, type = "lines", main = "Scree Plot of Principal Components", npcs = 8)
+abline(v = 4, lty = 2)
+# for printing:
+jpeg("pca_screeplot.jpeg")
+screeplot(pca_geo, type = "lines", main = "Scree Plot of Principal Components", npcs = 8)
+abline(v = 4, lty = 2)
+dev.off()
+
+summary(pca_geo)
+```
+
+The vector plots and the loadings below give some idea of the contributions of variables to the four dimensions. These could be used to interpret the meaning of the components/factors.
+
+Although this approach may be interesting as a point of discussion on how the variables relate to each other, taking this approach further would more likely lead to greater difficulties in the interpretation of outcomes and effects. If required however, this approach of working with latent constructs can be pursued.
+
+```{r}
+# using factomineR
+pca_geo_factoMineR <- PCA(geo_data_nums[complete.cases(geo_data_nums),-5], ncp = 4, graph = FALSE)
+
+sweep(pca_geo_factoMineR$var$coord,2,sqrt(pca_geo_factoMineR$eig[1:ncol(pca_geo_factoMineR$var$coord),1]),FUN="/")
+
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(1,2),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 1 & 2",
+             repel = TRUE # Avoid text overlapping
+)
+
+jpeg("contributions_pca_1n2.jpeg")
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(1,2),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 1 & 2",
+             repel = TRUE # Avoid text overlapping
+)
+dev.off()
+
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(3,4),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 3 & 4",
+             repel = TRUE # Avoid text overlapping
+)
+
+jpeg("contributions_pca_3n4.jpeg")
+fviz_pca_var(pca_geo_factoMineR,
+             axes = c(3,4),
+             col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title = "Dimensions 3 & 4",
+             repel = TRUE # Avoid text overlapping
+)
+dev.off()
+
+```
+
+## Simple Linear Regression 
+
+Separate simple linear regression models were considered for each of the targeted outcome variables. In each case the outcome variable was first considered with only *burn* as the predictor and then followed up by a model that included the additional effects.
+
+Due to earlier diagnostic plots indicating case number 58 to have an inordinately large influence on the linear models, and due to the researcher’s concerns about this particular sample, it was excluded in this draft.
+
+For each of the outcome variables (*hsv, hp, ph, loss-i*) the following model summaries are shown:
+
+ * a first summary output depicts only the category burn without an intercept;
+ * a second summary includes all the predictor variables, but with an intercept, to allow for the plotting of relative importance plots;
+ * using *BIC* or *AIC* as criterion, the five “best” subsets of the predictor variables are shown
+ * The summary output for the "best" model is then shown, unless *burn* remains insignificant.
+ 
+ Diagnostic plots and relative importance plots for the final models are then shown, although these plots are based on models containing all the levels of categorical variables that were identified to be included in the "best" models.
+
+```{r}
+# removing point 58 and identifying only complete cases
+geo_data <- geo_data[-58,]
+geo_data <- geo_data[complete.cases(geo_data),]
+
+```
+
+Models were considered for each of the outcome variables *hsv, hp, ph, and loss-ig*.
+
+#### Outcome: *hsv* 
+
+The first summary depict *hsv* against only *burn* but without an intercept. The second summary with relative importance plots applies to a model with all the predictors.
+
+```{r}
+
+model_hsv1 <- lm(hsv ~ -1 + burn, data = geo_data)
+summary(model_hsv1)
+
+model_hsv2 <- lm(hsv ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+summary(model_hsv2)
+
+model_hsv2_relimp <-calc.relimp.lm(model_hsv2, type = c("lmg","last", "first"))
+plot(model_hsv2_relimp)
+```
+Taken on its own *burn* is clearly a significant factor. However, when controlling for all the other available predictors it appears to be no longer signficant. The relative importance plots also do not highlight *burn* as a particulary important predictor of *hsv* either.
+
+Using BIC as criterion the five "best" models as well as the "best" model for every number of features are shown below. From these it can be concluded that *burn* does not feature as a significant predictor of *hsv*.
+
+
+```{r}
+# bestGlm
+
+x_bestglm_hsv <- model.matrix(hsv ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+y_bestglm_hsv <- geo_data[,'hsv']
+
+best_hsv <- bestglm(cbind.data.frame(x_bestglm_hsv[,-1], y_bestglm_hsv))
+
+best_hsv$BestModels
+best_hsv$Subsets
+```
+
+#### Outcome: *hp* 
+
+The first summary depict *hp* against only *burn* but without an intercept. The second summary with relative importance plots applies to a model with all the predictors.
+
+```{r}
+
+model_hp1 <- lm(hp ~ -1 + burn, data = geo_data)
+summary(model_hp1)
+
+model_hp2 <- lm(hp ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+summary(model_hp2)
+
+model_hp2_relimp <-calc.relimp.lm(model_hp2, type = c("lmg","last", "first"))
+plot(model_hp2_relimp)
+```
+As with *hsv* taken on its own *burn* is clearly a significant factor, but again, when controlling for all the other available predictors it appears to be no longer signficant. The relative importance plots also do not highlight *burn* as a particulary important predictor of *hp* either. However, using BIC as criterion, *burn* is identified as one of the variables in the "best" model, summary data of which is displayed below and which can be used to interpret the coefficients.
+
+
+```{r}
+# setting up bestglm
+x_bestglm_hp <- model.matrix(hp ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+y_bestglm_hp <- geo_data[,'hp']
+
+best_hp <- bestglm(cbind.data.frame(x_bestglm_hp[,-1], y_bestglm_hp))
+
+best_hp$BestModels
+best_hp
+```
+
+```{r}
+model_hp3 <- lm(hp ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        clay,
+                data = geo_data)
+
+model_hp3_relimp <-calc.relimp.lm(model_hp3, type = c("lmg","last", "first"))
+plot(model_hp3_relimp)
+
+plot(model_hp3)
+
+```
+The diagnostic plots do not give any cause for concern, showing reasonably normal and constant variance distribution of residuals.
+
+#### Outcome: *ph* 
+
+The first summary depict *ph* against only *burn* but without an intercept. The second summary with relative importance plots applies to a model with all the predictors.
+
+```{r}
+
+model_ph1 <- lm(ph ~ -1 + burn, data = geo_data)
+summary(model_ph1)
+
+model_ph2 <- lm(ph ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+summary(model_ph2)
+
+model_ph2_relimp <-calc.relimp.lm(model_ph2, type = c("lmg","last", "first"))
+plot(model_ph2_relimp)
+```
+As with *hsv* and *hp*, taken on its own *burn* is clearly a significant factor, but again, when controlling for all the other available predictors it appears to be signficant only at 90% level. The relative importance plots suggest somewhat higher levels of importance for *burn* as a predictor of *ph* than in the previous two sections..
+
+As before, using BIC as criterion, *burn* is identified as one of the variables in the "best" model, summary data of which is displayed below.
+
+
+```{r }
+# setting up bestglm
+x_bestglm_ph <- model.matrix(ph ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+y_bestglm_ph <- geo_data[,'ph']
+
+best_ph <- bestglm(cbind.data.frame(x_bestglm_ph[,-1], y_bestglm_ph), IC = "AIC")
+
+best_ph$BestModels
+best_ph
+```
+
+
+
+```{r}
+model_ph3 <- lm(ph ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation,
+                data = geo_data)
+
+model_ph3_relimp <-calc.relimp.lm(model_ph3, type = c("lmg","last", "first"))
+plot(model_ph3_relimp)
+
+plot(model_ph3)
+
+```
+
+
+#### Outcome: *loss_ig* 
+
+The first summary depict *loss_ig* against only *burn* but without an intercept. The second summary with relative importance plots applies to a model with all the predictors.
+
+```{r}
+
+model_loss_ig1 <- lm(loss_ig ~ -1 + burn, data = geo_data)
+summary(model_loss_ig1)
+
+model_loss_ig2 <- lm(loss_ig ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+summary(model_loss_ig2)
+
+model_loss_ig2_relimp <-calc.relimp.lm(model_loss_ig2, type = c("lmg","last", "first"))
+plot(model_loss_ig2_relimp)
+```
+As before, taken on its own *burn* is clearly a significant factor. In this case, even after controlling for all the other available predictors it appears to remain significant at the 99% level. The relative importance plots suggest somewhat higher levels of importance for *burn* as a predictor of *loss_ig* than in the previous two sections..
+
+As before, using BIC as criterion, *burn* is identified as one of the variables in the "best" model, summary data of which is displayed below.
+
+
+```{r }
+# setting up bestglm
+x_bestglm_loss_ig <- model.matrix(loss_ig ~
+                        burn +
+                        area2 +
+                        type +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+y_bestglm_loss_ig <- geo_data[,'loss_ig']
+
+best_loss_ig <- bestglm(cbind.data.frame(x_bestglm_loss_ig[,-1], y_bestglm_loss_ig), IC = "AIC")
+
+best_loss_ig$BestModels
+best_loss_ig
+```
+
+```{r}
+model_loss_ig3 <- lm(loss_ig ~
+                        burn +
+                        area2 +
+                        geology1 +
+                        aspect2 +
+                        veg +
+                        elevation +
+                        slope +
+                        sand +
+                        clay,
+                data = geo_data)
+
+model_loss_ig3_relimp <-calc.relimp.lm(model_loss_ig3, type = c("lmg","last", "first"))
+plot(model_loss_ig3_relimp)
+
+plot(model_loss_ig3)
+
+```
+
+
+# References
